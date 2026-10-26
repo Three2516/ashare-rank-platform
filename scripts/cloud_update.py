@@ -22,7 +22,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fetch_quotes import get_realtime, latest_close_from_kline  # noqa: E402
+from fetch_quotes import get_realtime  # noqa: E402
 
 try:
     import psycopg
@@ -49,12 +49,9 @@ def fetch_rows(baseline_rows, codes, mode, sleep_s):
     ok_rows, fail = [], []
     for i, r in enumerate(target, 1):
         try:
-            if mode == "realtime":
-                q = get_realtime(r["code"])
-                price, high = q["price"], r.get("high_price")
-            else:
-                k = latest_close_from_kline(r["code"])
-                price, high = k["close"], r.get("high_price")
+            # 统一走实时接口：盘中=实时价；收盘后=最近交易日收盘价（比日K接口快且稳，避免云端限流）
+            q = get_realtime(r["code"])
+            price, high = q["price"], r.get("high_price")
             if high is None or price > high:
                 high = round(price, 2)
             row = dict(r)
