@@ -1,0 +1,65 @@
+name: 云端行情更新（GitHub Actions）
+
+on:
+  schedule:
+    # cron 为 UTC 时间；下面两条均为北京时间换算（+8h）
+    # 盘中实时：北京 9:25-11:35 / 13:05-15:05（周一至五）≈ UTC 1:25-3:35 / 5:05-7:05
+    - cron: "*/5 1-3,5-7 * * 1-5"
+    # 收盘快照：北京 16:00（周一至五，收盘后）≈ UTC 8:00
+    - cron: "0 8 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 更新模式（realtime=盘中实时 / snapshot=收盘快照）
+        required: true
+        default: realtime
+        type: choice
+        options:
+          - realtime
+          - snapshot
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-data-update
+  cancel-in-progress: false
+
+jobs:
+  realtime:
+    name: 盘中实时更新
+    if: (github.event_name == 'schedule' && github.event.schedule == '*/5 1-3,5-7 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'realtime')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: pip install requests "psycopg[binary]"
+      - name: 抓取实时价并写入数据库
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 scripts/cloud_update.py --mode realtime
+
+  snapshot:
+    name: 收盘快照更新
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'snapshot')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: pip install requests "psycopg[binary]"
+      - name: 抓取收盘价并写入快照表
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 scripts/cloud_update.py --mode snapshot
+
+  # 可选：盘中轻量探活（提示 API 健康），后续需要时开启
+  # probe:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: curl -sf https://ashare-rank-platform.vercel.app/api/leaders >/dev/null

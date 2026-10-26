@@ -1,0 +1,23 @@
+{
+  "name": "ashare-rank-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A股数据榜单平台 MVP：行业龙头榜单（日频快照公开 / 盘中实时仅owner可见）",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^16.4.3",
+    "pg": "^8.23.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/pg": "^8.23.1",
+    "@types/react": "19.3.0",
+    "typescript": "7.0.2"
+  }
+}
