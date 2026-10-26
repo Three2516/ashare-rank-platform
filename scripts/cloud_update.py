@@ -140,8 +140,8 @@ def main():
     args = ap.parse_args()
 
     now = datetime.now(CST)
-    if not is_trading_time(now) and not args.force:
-        print(f"非交易时段（北京时间 {now:%Y-%m-%d %H:%M:%S}），本轮跳过。")
+    if args.mode == "realtime" and not is_trading_time(now) and not args.force:
+        print(f"非交易时段（北京时间 {now:%Y-%m-%d %H:%M:%S}），实时更新跳过；快照模式不受限。")
         return
 
     board = json.loads(BASELINE.read_text(encoding="utf-8"))
