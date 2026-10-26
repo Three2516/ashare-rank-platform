@@ -46,6 +46,7 @@ def main():
         target = rows[: args.limit]
 
     ok, fail = 0, []
+    ok_rows = []
     for i, r in enumerate(target, 1):
         try:
             k = latest_close_from_kline(r["code"])
@@ -57,6 +58,7 @@ def main():
                     (r["high_price"] - r["year_ago_price"]) / r["year_ago_price"] * 100, 2
                 )
             ok += 1
+            ok_rows.append(r)
             print(f"[{i}/{len(target)}] {r['code']} {r['name']} 昨收={k['close']} "
                   f"区间高={r['high_price']} 涨跌幅={r['change_pct']}% as_of={k['date']}")
         except Exception as e:
@@ -73,6 +75,18 @@ def main():
     print(f"\n完成：成功 {ok} / 失败 {len(fail)}")
     if fail:
         print("失败代码：", [c for c, _ in fail])
+    if args.db and ok_rows:
+        try:
+            conn = cloud_update.connect()
+            try:
+                cloud_update.upsert_snapshot(
+                    conn, ok_rows, now, datetime.now().date().isoformat()
+                )
+                print(f"已同步云端 leaders_snapshot：{len(ok_rows)} 行")
+            finally:
+                conn.close()
+        except Exception as e:
+            print(f"[db] 云端写入失败（本地文件已更新，不受影响）：{e}")
     if ok == 0:
         sys.exit(1)
 

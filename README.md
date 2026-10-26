@@ -27,8 +27,15 @@ ashare-rank-platform/
 │   └── schema.sql                # Supabase 迁移预留（users/leaders/realtime_cache/contents/usage）
 ├── scripts/
 │   ├── fetch_quotes.py           # 行情抓取公共模块（腾讯日K主通道 + 腾讯/新浪实时兜底）
-│   ├── update_snapshot.py        # 每日收盘后更新日频快照
-│   └── update_realtime.py        # 盘中循环更新实时缓存
+│   ├── update_snapshot.py        # 每日收盘后更新日频快照（--db 可同步云端）
+│   ├── update_realtime.py        # 盘中循环更新实时缓存（--db 可同步云端）
+│   └── cloud_update.py           # 云端抓取脚本（GitHub Actions 专用，独立运行）
+├── .github/workflows/realtime.yml  # 云端定时：盘中 5 分钟实时 + 收盘快照
+├── data/
+│   ├── leaders_snapshot.json     # 日频快照（131 行业龙头种子数据）
+│   ├── leaders_realtime.json     # 盘中实时缓存（初始=快照副本，仅 owner 可见）
+│   ├── schema.sql                # Supabase 迁移预留（users/leaders/realtime_cache/contents/usage）
+│   └── schema_cloud.sql          # 云端库 Schema（Vercel Postgres / Neon，leaders_realtime/snapshot/meta）
 ├── next.config.mjs / tsconfig.json / vercel.json / .env.example
 └── README.md
 ```
@@ -51,10 +58,11 @@ npm run dev          # 默认 http://localhost:3000
 
 | 请求 | 返回 |
 |---|---|
-| 无 token | `mode: "snapshot"` — 日频快照 `data/leaders_snapshot.json` |
-| `?token=<OWNER_TOKEN>` 或头 `x-owner-token: <OWNER_TOKEN>` | `mode: "realtime"` — 盘中实时 `data/leaders_realtime.json`，`isOwner: true` |
+| 无 token | `mode: "snapshot"` — 日频快照（优先云端 `leaders_snapshot` 表，数据库不可用时降级本地 `data/leaders_snapshot.json`） |
+| `?token=<OWNER_TOKEN>` 或头 `x-owner-token: <OWNER_TOKEN>` | `mode: "realtime"` — 盘中实时（优先云端 `leaders_realtime` 表，降级本地 `data/leaders_realtime.json`），`isOwner: true` |
 
-响应结构：`{ ok, mode, asOf, generatedAt, isOwner, industryCount, rows[] }`，
+响应结构：`{ ok, mode, asOf, generatedAt, isOwner, source, industryCount, rows[] }`，
+`source` 为 `"db"`（云端数据库）或 `"local"`（本地 JSON 兜底）；
 `rows[]` 字段：`code / name / industry(二级) / sector(一级) / year_ago_price / high_price / current_price / change_pct / listing_duration / listing_years / market_cap`。
 
 验证两档差异的示例（`OWNER_TOKEN=dev-token` 时）：
@@ -86,9 +94,46 @@ python3 scripts/update_realtime.py --loop 180
 
 ### 定时任务建议（生产）
 
-- 服务器 cron（每交易日 15:05 收盘后）：`python3 scripts/update_snapshot.py`，然后把 `data/leaders_snapshot.json` 提交/同步到仓库。
-- 盘中（9:30–15:00）：`python3 scripts/update_realtime.py --loop 180`，实时文件只存在于你的服务器，**永不对外发布**。
-- Vercel 部署读取仓库中的 `data/*.json`，`vercel.json` 里的 cron 为占位（Serverless 不适合跑 Python 抓取）。
+- 服务器 cron（每交易日 15:05 收盘后）：`python3 scripts/update_snapshot.py --db`，本地文件与云端库双写。
+- 盘中（9:30–15:00）：`python3 scripts/update_realtime.py --loop 180 --db`，实时文件只存在于你的服务器与云端库，**永不对外发布**。
+- 更推荐的方式：**GitHub Actions 云端定时**（见下节），电脑完全不用开机。
+
+## 云端数据更新（GitHub Actions + Vercel Postgres / Neon）
+
+目标：**电脑不开机，线上也实时**。链路：
+
+```
+GitHub Actions cron（每5分钟/交易时段）
+        │  python3 scripts/cloud_update.py（复用腾讯/新浪行情通道）
+        ▼
+云端 PostgreSQL（Vercel Postgres / Neon，DATABASE_URL）
+        ▲
+线上 /api/leaders ── 优先读库（source:"db"），库不可用降级本地 JSON
+```
+
+### 已交付的云端文件
+
+| 文件 | 作用 |
+|---|---|
+| `data/schema_cloud.sql` | 建表：`leaders_realtime`（131 行实时，仅 owner）、`leaders_snapshot`（快照，公开）、`meta`（最近更新时间/口径）；在 Vercel/Neon 控制台或 psql 执行 |
+| `scripts/cloud_update.py` | 云端抓取脚本：交易时段精确判断（北京周一至五 9:30-11:30/13:00-15:00，`--force` 跳过）、失败个股保留库中原值不编造、写库 UPSERT |
+| `.github/workflows/realtime.yml` | 盘中实时 job（`*/5 1-3,5-7 * * 1-5` UTC = 北京 9:25-11:35/13:05-15:05）+ 收盘快照 job（`0 8 * * 1-5` UTC = 北京 16:00）+ 手动 `workflow_dispatch` |
+
+### 需要你完成的操作（一次性）
+
+1. **建云端数据库**：Vercel Dashboard → Storage → Create Database → Postgres（或直接在 Neon 建库），复制连接串（形如 `postgresql://...?...`）。
+2. **初始化表**：把 `data/schema_cloud.sql` 全文粘贴到 Vercel/Neon 的 SQL 编辑器执行（可重复执行）。
+3. **Vercel 项目加环境变量**：`DATABASE_URL` = 连接串（线上 API 读库）；`OWNER_TOKEN` 保持 `dev-token-2026`（或换新值）。
+4. **推送到 GitHub 并加 Secrets**：项目推到 GitHub 仓库后，Settings → Secrets and variables → Actions 新增 `DATABASE_URL` = 同一连接串（Actions 写库用）。
+5. **手动触发一次**：Actions 页面 → realtime.yml → Run workflow → mode 选 `realtime`，确认跑绿；再 Run 一次选 `snapshot`。
+6. **验证线上**：`https://ashare-rank-platform.vercel.app/api/leaders` 应返回 `source:"db"`、`mode:"snapshot"`；加 `?token=dev-token-2026` 返回 `source:"db"`、`mode:"realtime"` 且 `asOf` 为最近抓取时间。
+
+> 完成后告诉我，我继续做线上联调验证（owner 档实时 / 公开档快照 / 数据一致性核对）。
+
+### 本地联调（可选）
+
+- 本地跑 API 无 `DATABASE_URL` 时自动走本地 JSON 兜底（`source:"local"`），功能不回退。
+- 本地脚本加 `--db` 可双通道：`update_realtime.py --once --db`、`update_snapshot.py --db`（云端写失败只提示，不影响本地文件）。
 
 ## 部署（Vercel）
 

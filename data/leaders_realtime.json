@@ -1,8 +1,8 @@
 {
  "meta": {
   "mode": "realtime",
-  "generated_at": "2026-10-25 21:45:07",
-  "as_of": "盘中实时（更新于 2026-10-25 21:45:07）",
+  "generated_at": "2026-10-26 21:00:16",
+  "as_of": "盘中实时（更新于 2026-10-26 21:00:16）",
   "note": "仅owner可见; 由 scripts/update_realtime.py 盘中刷新"
  },
  "rows": [
@@ -1339,7 +1339,7 @@
    "sector": "食品饮料",
    "year_ago_price": 1455.0,
    "high_price": 1568.0,
-   "current_price": 1335.0,
+   "current_price": 1349.98,
    "change_pct": 7.77,
    "listing_duration": "25年1个月",
    "listing_years": 25.1,
